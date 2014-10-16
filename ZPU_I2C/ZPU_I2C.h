@@ -1,5 +1,5 @@
 #ifndef _ZPU_I2C_H_
-#define _ZPU_I2C_H
+#define _ZPU_I2C_H_
 
 #include "Arduino.h"
 
@@ -22,13 +22,6 @@
 #define I2C_RXR REGISTER(I2C_BASE, 3)
 #define I2C_CR REGISTER(I2C_BASE, 4)
 #define I2C_SR REGISTER(I2C_BASE, 4)
- 
-/* Define FPGA pins
- */
-#define I2C_SCL_O WING_C_7
-#define I2C_SCL_I WING_C_6
-#define I2C_SDA_O WING_C_5
-#define I2C_SDA_I WING_C_4
  
 /* I2C core control register bit definitions.
  */
@@ -77,19 +70,6 @@
 // one byte transfer has been completed
 // arbitration is lost
  
-/* I2C core register definitions.
- */
-#define R0 0x00
-#define R1 0x02
-#define R2 0x04
-#define R3 0x06
-#define R4 0x08
-#define R5 0x0A
-#define R6 0x0C
-#define R7 0x0E
-#define R8 0x10
-#define R9 0x12
- 
 /* I2C core read/write flags.
  */
 #define I2C_M_WR 0x00
@@ -109,14 +89,17 @@
 class ZPU_I2C
 {
     public:   
-        ZPU_I2C();
+        ZPU_I2C(uint32_t scl_o, uint32_t scl_i, uint32_t sda_o, uint32_t sda_i);   
+        void begin();
+        void begin(uint32_t clock_speed);
+        void end();
         
-        void setSpeed(uint32_t fast);
+        void setSpeed(uint32_t clock_speed);
         uint32_t write(uint32_t address, uint32_t registerAddress, uint32_t data);
         uint32_t read(uint32_t address, uint32_t register, uint32_t *dataBuffer);
+        uint32_t ping(uint32_t address);
         
     private:
-        
 };
     
 #endif

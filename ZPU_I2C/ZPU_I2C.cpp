@@ -1,26 +1,73 @@
 #include "ZPU_I2C.h"
 #include "Arduino.h"
 
-ZPU_I2C::ZPU_I2C()
+/* Constructor.
+ */
+ZPU_I2C::ZPU_I2C(uint32_t scl_o, uint32_t scl_i, uint32_t sda_o, uint32_t sda_i)
 {
-    setSpeed(LOW_SPEED_CLOCK);
+    /* Define pins and PPS.
+     */
+    pinMode(scl_o, OUTPUT);                 // Define FPGA pin as an output
+    pinModePPS(scl_o, HIGH);                //
+    outputPinForFunction(scl_o, I2C_SCL);   // Connect FPGA pin to PPS bit
+
+    pinMode(scl_i, INPUT);                  // Define FPGA pin as an input
+    inputPinForFunction(scl_i, I2C_SCL);    // Connect FPGA pin to PPS bit
+
+    pinMode(sda_o, OUTPUT);
+    pinModePPS(sda_o, HIGH);
+    outputPinForFunction(sda_o, I2C_SDA);
+
+    pinMode(sda_i, INPUT);
+    inputPinForFunction(sda_i, I2C_SDA);    
 }
 
+
+/* Enable the core.
+ */
+void ZPU_I2C::begin()
+{ 
+    /* Enable the core and set I2C speed.
+     */
+    setSpeed(LO_SPEED);
+    I2C_CTR = CTR_EN;
+}
+
+/* Enable the core.
+ */
+void ZPU_I2C::begin(uint32_t clock_speed)
+{
+    setSpeed(clock_speed);
+    I2C_CTR = CTR_EN;
+}
+
+/* Disable the core.
+ */
+void ZPU_I2C::end()
+{
+    /* Disable the core.
+     */
+    I2C_CTR = 0x00;
+}
+
+
+/* Set I2C clock speed.
+ */
 void ZPU_I2C::setSpeed(uint32_t clock_speed)
 {
     /* Register value calculation taken from 
      * I2C-Master Core Specification.
      */
-    uint32_t reg_value = (clock_speed == LOW_SPEED_CLOCK) ?
-        (CLOCK_SPEED / (5 * LO_SPEED)) - 1 :
-        (CLOCK_SPEED / (5 * HI_SPEED)) - 1;
-        
+    uint32_t reg_value = (CLOCK_SPEED / (5 * clock_speed)) - 1;
     I2C_PRERhi = (reg_value >> 8) & 0x00FF;
     I2C_PRERlo = (reg_value >> 0) & 0x00FF;
 }
 
+
+/* Write value to a specified register.
+ */
 uint32_t ZPU_I2C::write(
-    uint32_t address, uint32_t register_address, uint32_t data)
+    uint32_t i2c_address, uint32_t register_address, uint32_t data)
 {
     int state_value = 0;
  
@@ -28,7 +75,7 @@ uint32_t ZPU_I2C::write(
      */
     if (state_value == 0)
     {
-        I2C_TXR = address << 1;
+        I2C_TXR = i2c_address << 1;
         I2C_CR = CR_WR | CR_STA;
         while ((I2C_SR & SR_TIP) != 0);
         state_value = ((I2C_SR & SR_RxACK) == 0) ? 1 : 0;
@@ -38,10 +85,10 @@ uint32_t ZPU_I2C::write(
      */
     if (state_value == 1)
     {
-        I2C_TXR = R0;
+        I2C_TXR = register_address;
         I2C_CR = CR_WR;
         while ((I2C_SR & SR_TIP) != 0);
-        state_value = ((I2C_SR & SR_RxACK) == 0) ? 2 : 0;
+        state_value = ((I2C_SR & SR_RxACK) == 0) ? 2 : 1;
     }
  
     /* Write the value.
@@ -51,13 +98,16 @@ uint32_t ZPU_I2C::write(
        I2C_TXR = data;
        I2C_CR = CR_WR | CR_STO;
        while ((I2C_SR & SR_TIP) != 0);
-       state_value = ((I2C_SR & SR_RxACK) == 0) ? 3 : 0;
+       state_value = ((I2C_SR & SR_RxACK) == 0) ? 3 : 2;
     }
-    return SUCCESS;
+    return (state_value == 0) ? ~SUCCESS : SUCCESS;
 }
 
+
+/* Read value from a specified register.
+ */
 uint32_t ZPU_I2C::read(
-    uint32_t address, uint32_t register_address, uint32_t *data_buffer)
+    uint32_t i2c_address, uint32_t register_address, uint32_t *data_buffer)
 {
     /* Read the value back from the device.
      */   
@@ -67,8 +117,8 @@ uint32_t ZPU_I2C::read(
      */
     if (state_value == 0)
     {
-        I2C_TXR = (address << 1);
-        I2C_CR = CR_WR | CR_STA;
+        I2C_TXR = (i2c_address << 1);
+        I2C_CR = CR_WR;
         while ((I2C_SR & SR_TIP) != 0);
         state_value = ((I2C_SR & SR_RxACK) == 0) ? 1 : 0;
     }
@@ -87,7 +137,7 @@ uint32_t ZPU_I2C::read(
      */
     if (state_value == 2)
     {
-        I2C_TXR = (address << 1) | 0x01;
+        I2C_TXR = (i2c_address << 1) | 0x01;
         I2C_CR = CR_WR | CR_STA;
         while ((I2C_SR & SR_TIP) != 0);
         state_value = ((I2C_SR & SR_RxACK) == 0) ? 3 : 0;
@@ -95,22 +145,51 @@ uint32_t ZPU_I2C::read(
  
     /* Read the value.
      */
-    uint32_t value = 0;
     if (state_value = 3)
     {
         I2C_CR = CR_RD | CR_STO | CR_ACK;
         while ((I2C_SR & SR_TIP) != 0);
-        value = I2C_RXR;
-        state_value = 4;
+        state_value = ((I2C_SR & SR_RxACK) == 0) ? 4 : 0;
+        *data_buffer = I2C_RXR;
     }
-    
-    /* Stop on error.
+    /* Or stop on error (state_value == 0)
      */
-    if (state_value == 0)
+    else
     {
         I2C_CR = CR_STO;
         while ((I2C_SR & SR_TIP) != 0);
     }
-    *data_buffer = value;
-    return SUCCESS;
+    
+    return (state_value == 0) ? ~SUCCESS : SUCCESS;
+}
+
+
+/* Ping a specified address.
+ */
+uint32_t ZPU_I2C::ping(
+    uint32_t address)
+{
+    int state_value = 0;
+ 
+    /* Write the device address.
+     */
+    if (state_value == 0)
+    {
+        I2C_TXR = (address << 1);
+        I2C_CR = CR_WR | CR_STA;
+        while ((I2C_SR & SR_TIP) != 0);
+        state_value = ((I2C_SR & SR_RxACK) == 0) ? 1 : 0;
+    }
+ 
+    /* Send stop on successful ack.
+     */
+    if (state_value == 1)
+    {
+       I2C_CR = CR_STO;
+       while ((I2C_SR & SR_TIP) != 0);
+    }
+    
+    /* Return SUCCESS or FAILURE
+     */
+    return (state_value == 0) ? ~SUCCESS : SUCCESS;
 }
